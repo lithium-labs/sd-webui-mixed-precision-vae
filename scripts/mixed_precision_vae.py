@@ -19,44 +19,44 @@ class Script(scripts.Script):
             p = p.to(dtype=precision)
 
     def before_process(self, p, *args, **kwargs):
-        if 0:
-            # Uncomment to print the VAE parameter size
-            params = 0
-            for x in p.sd_model.first_stage_model.parameters():
-                params += x.numel() * (4 if x.dtype == torch.float32 else 2)
-            print('VAE params', params/1e9, 'GB')
+        # Check if the model has a valid first_stage_model attribute (Forge compatibility guard)
         first_stage = getattr(p.sd_model, 'first_stage_model', None)
-        if first_stage and hasattr(getattr(first_stage, 'decoder', None), 'mixed_precision'):
+        if first_stage is None:
+            return
+
+        if hasattr(getattr(first_stage, 'decoder', None), 'mixed_precision'):
             # Already replaced
             return
-        precision = p.sd_model.first_stage_model.decoder.conv_in.weight.dtype
+
+        precision = first_stage.decoder.conv_in.weight.dtype
         if precision == torch.float32:
             print('Skipping mixed precision VAE extension due to VAE being in fp32 precision')
             return
 
         # Encoder
-        p.sd_model.first_stage_model.encoder.mixed_weights = [p.sd_model.first_stage_model.encoder.norm_out,
-                p.sd_model.first_stage_model.encoder.conv_out,
-                p.sd_model.first_stage_model.encoder.mid.attn_1]
-        p.sd_model.first_stage_model.encoder.mixed_precision = False
-        p.sd_model.first_stage_model.encoder.precision = precision
-        p.sd_model.first_stage_model.encoder.orig_forward = p.sd_model.first_stage_model.encoder.forward
-        p.sd_model.first_stage_model.encoder.cast_weights = types.MethodType(vae_blocks.cast_weights,
-                                                              p.sd_model.first_stage_model.encoder)
-        p.sd_model.first_stage_model.encoder.forward = types.MethodType(vae_blocks.encoder_forward,
-                                                            p.sd_model.first_stage_model.encoder)
-        # Decoder
-        p.sd_model.first_stage_model.decoder.mixed_weights = [p.sd_model.first_stage_model.decoder.conv_out,
-                                                              p.sd_model.first_stage_model.decoder.norm_out]
-        p.sd_model.first_stage_model.decoder.mixed_precision = False
-        p.sd_model.first_stage_model.decoder.precision = precision
-        p.sd_model.first_stage_model.decoder.orig_forward = p.sd_model.first_stage_model.decoder.forward
-        p.sd_model.first_stage_model.decoder.cast_weights = types.MethodType(vae_blocks.cast_weights,
-                                                                p.sd_model.first_stage_model.decoder)
-        p.sd_model.first_stage_model.decoder.forward = types.MethodType(vae_blocks.decoder_forward,
-                                                            p.sd_model.first_stage_model.decoder)
+        first_stage.encoder.mixed_weights = [
+            first_stage.encoder.norm_out,
+            first_stage.encoder.conv_out,
+            first_stage.encoder.mid.attn_1
+        ]
+        first_stage.encoder.mixed_precision = False
+        first_stage.encoder.precision = precision
+        first_stage.encoder.orig_forward = first_stage.encoder.forward
+        first_stage.encoder.cast_weights = types.MethodType(vae_blocks.cast_weights, first_stage.encoder)
+        first_stage.encoder.forward = types.MethodType(vae_blocks.encoder_forward, first_stage.encoder)
 
-        for m in p.sd_model.first_stage_model.modules():
+        # Decoder
+        first_stage.decoder.mixed_weights = [
+            first_stage.decoder.conv_out,
+            first_stage.decoder.norm_out
+        ]
+        first_stage.decoder.mixed_precision = False
+        first_stage.decoder.precision = precision
+        first_stage.decoder.orig_forward = first_stage.decoder.forward
+        first_stage.decoder.cast_weights = types.MethodType(vae_blocks.cast_weights, first_stage.decoder)
+        first_stage.decoder.forward = types.MethodType(vae_blocks.decoder_forward, first_stage.decoder)
+
+        for m in first_stage.modules():
             if m.__class__.__name__ == "ResnetBlock":
                 mixed_weights = [m.norm1, m.conv2]
                 if hasattr(m, 'nin_shortcut'):
@@ -76,4 +76,5 @@ class Script(scripts.Script):
                 m.mixed_precision = False
                 m.cast_weights = types.MethodType(vae_blocks.cast_weights, m)
                 m.forward = types.MethodType(vae_blocks.wrapped_mixed_forward, m)
+                
         print('Mixed precision VAE extension applied')
