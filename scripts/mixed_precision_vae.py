@@ -25,7 +25,8 @@ class Script(scripts.Script):
             for x in p.sd_model.first_stage_model.parameters():
                 params += x.numel() * (4 if x.dtype == torch.float32 else 2)
             print('VAE params', params/1e9, 'GB')
-        if hasattr(p.sd_model.first_stage_model.decoder, 'mixed_precision'):
+        first_stage = getattr(p.sd_model, 'first_stage_model', None)
+        if first_stage and hasattr(getattr(first_stage, 'decoder', None), 'mixed_precision'):
             # Already replaced
             return
         precision = p.sd_model.first_stage_model.decoder.conv_in.weight.dtype
